@@ -77,10 +77,25 @@ def update_user_data(user_id, updates):
 # Events
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
-    print(f'🟢 {bot.user} is online!')
-    print(f'📊 Tracking {len(TRACKING_DOMAINS)} delivery domains')
-    print(f'🎁 Reward every {PUNCHES_PER_REWARD} punches')
+    try:
+        # Sync commands globally
+        synced = await bot.tree.sync()
+        print(f'🟢 {bot.user} is online!')
+        print(f'✅ Synced {len(synced)} commands globally')
+        
+        # Also sync to each guild for instant updates
+        for guild in bot.guilds:
+            try:
+                bot.tree.copy_global_to(guild=guild)
+                guild_synced = await bot.tree.sync(guild=guild)
+                print(f'✅ Synced {len(guild_synced)} commands to {guild.name}')
+            except Exception as guild_error:
+                print(f'❌ Failed to sync to {guild.name}: {guild_error}')
+        
+        print(f'📊 Tracking {len(TRACKING_DOMAINS)} delivery domains')
+        print(f'🎁 Reward every {PUNCHES_PER_REWARD} punches')
+    except Exception as e:
+        print(f'❌ Failed to sync commands: {e}')
 
 @bot.event
 async def on_message(message):
@@ -306,6 +321,44 @@ async def referral(interaction: discord.Interaction, user: discord.Member, amoun
     )
     embed.add_field(name="Total Referrals", value=f"👥 {new_referrals}")
     
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="referralremove", description="Remove referral credit from a user")
+@app_commands.describe(user="The user to remove referrals from", amount="Number of referrals to remove")
+async def referral_remove(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not interaction.user.guild_permissions.manage_messages:
+        await interaction.response.send_message("❌ You need 'Manage Messages' permission.", ephemeral=True)
+        return
+
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be positive.", ephemeral=True)
+        return
+
+    user_data = get_user_data(user.id)
+    old_referrals = user_data['referrals']
+    new_referrals = max(0, old_referrals - amount)
+    actual_removed = old_referrals - new_referrals
+
+    update_user_data(user.id, {
+        'punches': user_data['punches'],
+        'free_orders': user_data['free_orders'],
+        'referrals': new_referrals
+    })
+
+    embed = discord.Embed(
+        title="👥 Referrals Removed",
+        description=f"Removed **{actual_removed}** referral(s) from {user.mention}",
+        color=0xe67e22
+    )
+    embed.add_field(name="Remaining Referrals", value=f"👥 {new_referrals}", inline=True)
+
+    if actual_removed < amount:
+        embed.add_field(
+            name="⚠️ Note",
+            value=f"User only had {old_referrals} referral(s) available.",
+            inline=False
+        )
+
     await interaction.response.send_message(embed=embed)
 
 # Register command group
